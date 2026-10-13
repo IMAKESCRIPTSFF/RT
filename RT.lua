@@ -3,19 +3,22 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Network = ReplicatedStorage:WaitForChild("Network")
 
+-- Input simulation (availability depends on execution environment)
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
 -- Settings
 local HATCH_INTERVAL = 0.2
 local TELEPORT_INTERVAL = 3
+local CHEST_INTERVAL = 0.1
 local TAP_INTERVAL = 0.01
 local RUNE_INTERVAL = 0.01
-local ACKNOWLEDGE_INTERVAL = 0.5
-local BOSS_DELAY = 30
+local ACKNOWLEDGE_INTERVAL = 5
+local BOSS_DELAY = 3
 
 local HATCH_POSITION = Vector3.new(-252, 5, 494)
 
@@ -32,6 +35,7 @@ local running = true
 local tapEnabled = false
 local runesEnabled = false
 local hatchEnabled = false
+local chestEnabled = false
 local bossesEnabled = false
 local minimized = false
 local selectedBosses = {}
@@ -68,15 +72,13 @@ local function teleportCharacter()
     end
 end
 
--- Remove previous GUI
+-- Remove old GUI
 local oldGui = playerGui:FindFirstChild("AutoControlGUI")
-
 if oldGui then
     oldGui:Destroy()
 end
 
---// GUI setup
-
+-- GUI setup
 local gui = Instance.new("ScreenGui")
 gui.Name = "AutoControlGUI"
 gui.ResetOnSpawn = false
@@ -117,7 +119,7 @@ title.TextSize = 15
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = topBar
 
--- Create button
+-- Button creator
 local function makeButton(parent, text, size, position, color)
     local button = Instance.new("TextButton")
     button.Size = size
@@ -138,16 +140,12 @@ local function makeButton(parent, text, size, position, color)
 end
 
 local minimizeButton = makeButton(
-    topBar,
-    "-",
-    UDim2.fromOffset(25, 25),
+    topBar, "-", UDim2.fromOffset(25, 25),
     UDim2.new(1, -62, 0, 5)
 )
 
 local closeButton = makeButton(
-    topBar,
-    "X",
-    UDim2.fromOffset(25, 25),
+    topBar, "X", UDim2.fromOffset(25, 25),
     UDim2.new(1, -32, 0, 5),
     Color3.fromRGB(150, 45, 50)
 )
@@ -184,7 +182,7 @@ local function makeSection(text)
     return label
 end
 
--- Toggle button
+-- Toggle creator
 local function makeToggle(text, callback)
     local enabled = false
 
@@ -204,7 +202,6 @@ local function makeToggle(text, callback)
         enabled = not enabled
 
         button.Text = text .. (enabled and ": ON" or ": OFF")
-
         button.BackgroundColor3 = enabled
             and Color3.fromRGB(45, 125, 85)
             or Color3.fromRGB(55, 55, 70)
@@ -219,7 +216,7 @@ local function makeToggle(text, callback)
     return button
 end
 
---// Auto Acknowledge Boss Exit
+--// AUTO ACKNOWLEDGE BOSS EXIT
 
 task.spawn(function()
     local remote = Network:WaitForChild("AcknowledgeBossExit")
@@ -262,9 +259,7 @@ makeToggle("Equip Best Runes", function(enabled)
     end
 end)
 
---// AUTO HATCH
--- Press T instead of calling Network.OpenEgg.
--- Teleport to HATCH_POSITION every 3 seconds.
+--// AUTO HATCH: PRESS T + TELEPORT
 
 makeSection("AUTO HATCH")
 
@@ -272,7 +267,7 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     hatchEnabled = enabled
 
     if enabled then
-        -- Repeatedly simulate pressing T
+        -- Simulate T key presses
         task.spawn(function()
             while running and hatchEnabled do
                 local success, err = pcall(function()
@@ -312,6 +307,31 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     end
 end)
 
+--// AUTO OPEN KEYS
+
+makeSection("AUTO OPEN KEYS")
+
+makeToggle("Auto Open Keys", function(enabled)
+    chestEnabled = enabled
+
+    if enabled then
+        task.spawn(function()
+            local chestRemote =
+                Network:WaitForChild("Open Universal Chest")
+
+            while running and chestEnabled do
+                safeInvoke(
+                    chestRemote,
+                    "Ancient Oasis Chest",
+                    1
+                )
+
+                task.wait(CHEST_INTERVAL)
+            end
+        end)
+    end
+end)
+
 --// AUTO BOSSES
 
 makeSection("AUTO BOSSES")
@@ -336,14 +356,13 @@ for _, bossName in ipairs(BOSS_NAMES) do
         local selected = selectedBosses[bossName]
 
         button.Text = bossName .. (selected and ": ON" or ": OFF")
-
         button.BackgroundColor3 = selected
             and Color3.fromRGB(65, 100, 150)
             or Color3.fromRGB(55, 55, 70)
     end)
 end
 
--- Auto Bosses toggle
+-- Auto Bosses
 makeToggle("Auto Bosses", function(enabled)
     bossesEnabled = enabled
 
@@ -373,7 +392,7 @@ makeToggle("Auto Bosses", function(enabled)
                                 bossPart
                             )
 
-                            -- Fixed delay; doesn't confirm boss defeat.
+                            -- Fixed delay; doesn't confirm defeat.
                             task.wait(BOSS_DELAY)
                         end)
 
@@ -419,6 +438,7 @@ closeButton.MouseButton1Click:Connect(function()
     tapEnabled = false
     runesEnabled = false
     hatchEnabled = false
+    chestEnabled = false
     bossesEnabled = false
 
     gui:Destroy()
