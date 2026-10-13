@@ -3,13 +3,11 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Network = ReplicatedStorage:WaitForChild("Network")
-
--- Input simulation (availability depends on execution environment)
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Settings
 local HATCH_INTERVAL = 0.2
@@ -19,6 +17,7 @@ local TAP_INTERVAL = 0.01
 local RUNE_INTERVAL = 0.01
 local ACKNOWLEDGE_INTERVAL = 5
 local BOSS_DELAY = 3
+local MERCHANT_INTERVAL = 1
 
 local HATCH_POSITION = Vector3.new(-252, 5, 494)
 
@@ -37,6 +36,7 @@ local runesEnabled = false
 local hatchEnabled = false
 local chestEnabled = false
 local bossesEnabled = false
+local merchantEnabled = false
 local minimized = false
 local selectedBosses = {}
 
@@ -259,7 +259,7 @@ makeToggle("Equip Best Runes", function(enabled)
     end
 end)
 
---// AUTO HATCH: PRESS T + TELEPORT
+--// AUTO HATCH
 
 makeSection("AUTO HATCH")
 
@@ -267,24 +267,17 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     hatchEnabled = enabled
 
     if enabled then
-        -- Simulate T key presses
         task.spawn(function()
             while running and hatchEnabled do
                 local success, err = pcall(function()
                     VirtualInputManager:SendKeyEvent(
-                        true,
-                        Enum.KeyCode.T,
-                        false,
-                        game
+                        true, Enum.KeyCode.T, false, game
                     )
 
                     task.wait(0.05)
 
                     VirtualInputManager:SendKeyEvent(
-                        false,
-                        Enum.KeyCode.T,
-                        false,
-                        game
+                        false, Enum.KeyCode.T, false, game
                     )
                 end)
 
@@ -297,7 +290,6 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
             end
         end)
 
-        -- Teleport every 3 seconds
         task.spawn(function()
             while running and hatchEnabled do
                 teleportCharacter()
@@ -320,13 +312,34 @@ makeToggle("Auto Open Keys", function(enabled)
                 Network:WaitForChild("Open Universal Chest")
 
             while running and chestEnabled do
-                safeInvoke(
-                    chestRemote,
-                    "Ancient Oasis Chest",
-                    1
-                )
-
+                safeInvoke(chestRemote, "Ancient Oasis Chest", 1)
                 task.wait(CHEST_INTERVAL)
+            end
+        end)
+    end
+end)
+
+--// AUTO MERCHANT
+
+makeSection("AUTO MERCHANT")
+
+makeToggle("Auto Buy Merchant", function(enabled)
+    merchantEnabled = enabled
+
+    if enabled then
+        task.spawn(function()
+            local merchantRemote =
+                Network:WaitForChild("BuyMerchantItem")
+
+            while running and merchantEnabled do
+                for merchantId = 1, 3 do
+                    if not running or not merchantEnabled then
+                        break
+                    end
+
+                    safeInvoke(merchantRemote, merchantId)
+                    task.wait(MERCHANT_INTERVAL)
+                end
             end
         end)
     end
@@ -336,7 +349,6 @@ end)
 
 makeSection("AUTO BOSSES")
 
--- Individual boss selection
 for _, bossName in ipairs(BOSS_NAMES) do
     local button = makeButton(
         content,
@@ -362,7 +374,6 @@ for _, bossName in ipairs(BOSS_NAMES) do
     end)
 end
 
--- Auto Bosses
 makeToggle("Auto Bosses", function(enabled)
     bossesEnabled = enabled
 
@@ -392,16 +403,11 @@ makeToggle("Auto Bosses", function(enabled)
                                 bossPart
                             )
 
-                            -- Fixed delay; doesn't confirm defeat.
                             task.wait(BOSS_DELAY)
                         end)
 
                         if not ok then
-                            warn(
-                                "[Auto Control] Boss error:",
-                                bossName,
-                                err
-                            )
+                            warn("[Auto Control] Boss error:", bossName, err)
                         end
 
                         task.wait(1)
@@ -414,7 +420,7 @@ makeToggle("Auto Bosses", function(enabled)
             end
         end)
     end
-end)
+end
 
 --// MINIMIZE / RESTORE
 
@@ -440,6 +446,7 @@ closeButton.MouseButton1Click:Connect(function()
     hatchEnabled = false
     chestEnabled = false
     bossesEnabled = false
+    merchantEnabled = false
 
     gui:Destroy()
 end)
