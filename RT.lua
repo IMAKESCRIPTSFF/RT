@@ -10,10 +10,10 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Network = ReplicatedStorage:WaitForChild("Network")
 
 -- Settings
+local HATCH_INTERVAL = 0.2
+local TELEPORT_INTERVAL = 3
 local TAP_INTERVAL = 0.01
 local RUNE_INTERVAL = 0.01
-local AUTO_OPEN_INTERVAL = 0.2
-local TELEPORT_INTERVAL = 3
 local ACKNOWLEDGE_INTERVAL = 0.5
 local BOSS_DELAY = 30
 
@@ -34,6 +34,7 @@ local runesEnabled = false
 local hatchEnabled = false
 local bossesEnabled = false
 local minimized = false
+local hatchCount = 7
 local selectedBosses = {}
 
 for _, name in ipairs(BOSS_NAMES) do
@@ -55,7 +56,6 @@ local function safeInvoke(remote, ...)
     return success, result
 end
 
--- Teleport character
 local function teleportCharacter()
     local character = player.Character
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -65,7 +65,7 @@ local function teleportCharacter()
     end
 end
 
--- Remove previous GUI
+-- Remove old GUI
 local oldGui = playerGui:FindFirstChild("AutoControlGUI")
 if oldGui then
     oldGui:Destroy()
@@ -132,16 +132,12 @@ local function makeButton(parent, text, size, position, color)
 end
 
 local minimizeButton = makeButton(
-    topBar,
-    "-",
-    UDim2.fromOffset(25, 25),
+    topBar, "-", UDim2.fromOffset(25, 25),
     UDim2.new(1, -62, 0, 5)
 )
 
 local closeButton = makeButton(
-    topBar,
-    "X",
-    UDim2.fromOffset(25, 25),
+    topBar, "X", UDim2.fromOffset(25, 25),
     UDim2.new(1, -32, 0, 5),
     Color3.fromRGB(150, 45, 50)
 )
@@ -178,11 +174,9 @@ local function makeToggle(text, callback)
     local enabled = false
 
     local button = makeButton(
-        content,
-        text .. ": OFF",
+        content, text .. ": OFF",
         UDim2.new(1, -2, 0, 30),
-        UDim2.new(),
-        Color3.fromRGB(55, 55, 70)
+        UDim2.new(), Color3.fromRGB(55, 55, 70)
     )
 
     button.MouseButton1Click:Connect(function()
@@ -191,14 +185,13 @@ local function makeToggle(text, callback)
         end
 
         enabled = not enabled
-
         button.Text = text .. (enabled and ": ON" or ": OFF")
         button.BackgroundColor3 = enabled
             and Color3.fromRGB(45, 125, 85)
             or Color3.fromRGB(55, 55, 70)
 
-        local success, err = pcall(callback, enabled)
-        if not success then
+        local ok, err = pcall(callback, enabled)
+        if not ok then
             warn("[Auto Control] Toggle error:", err)
         end
     end)
@@ -206,7 +199,7 @@ local function makeToggle(text, callback)
     return button
 end
 
--- Auto Acknowledge Boss Exit: every 0.5 seconds
+-- Auto Acknowledge Boss Exit
 task.spawn(function()
     local remote = Network:WaitForChild("AcknowledgeBossExit")
 
@@ -216,7 +209,7 @@ task.spawn(function()
     end
 end)
 
--- General features
+-- Auto Tap
 makeSection("GENERAL")
 
 makeToggle("Auto Tap", function(enabled)
@@ -232,6 +225,7 @@ makeToggle("Auto Tap", function(enabled)
     end
 end)
 
+-- Equip Best Runes
 makeToggle("Equip Best Runes", function(enabled)
     runesEnabled = enabled
 
@@ -245,19 +239,57 @@ makeToggle("Equip Best Runes", function(enabled)
     end
 end)
 
--- Auto Open Egg: uses SetPendingAutoOpenEgg
-makeSection("AUTO OPEN EGG")
+-- Auto Hatch
+makeSection("AUTO HATCH")
 
-makeToggle("Auto Open Fall Event Egg", function(enabled)
+local countLabel = Instance.new("TextLabel")
+countLabel.Size = UDim2.new(1, -2, 0, 22)
+countLabel.BackgroundTransparency = 1
+countLabel.Text = "Eggs per request (1-100):"
+countLabel.TextColor3 = Color3.fromRGB(230, 230, 235)
+countLabel.TextSize = 12
+countLabel.Font = Enum.Font.Gotham
+countLabel.TextXAlignment = Enum.TextXAlignment.Left
+countLabel.Parent = content
+
+local countBox = Instance.new("TextBox")
+countBox.Size = UDim2.new(1, -2, 0, 30)
+countBox.BackgroundColor3 = Color3.fromRGB(42, 42, 53)
+countBox.BorderSizePixel = 0
+countBox.Text = "7"
+countBox.PlaceholderText = "Egg count"
+countBox.TextColor3 = Color3.new(1, 1, 1)
+countBox.TextSize = 13
+countBox.Font = Enum.Font.Gotham
+countBox.ClearTextOnFocus = false
+countBox.Parent = content
+
+local countCorner = Instance.new("UICorner")
+countCorner.CornerRadius = UDim.new(0, 5)
+countCorner.Parent = countBox
+
+countBox.FocusLost:Connect(function()
+    local number = tonumber(countBox.Text)
+
+    if number then
+        hatchCount = math.clamp(math.floor(number), 1, 100)
+    end
+
+    countBox.Text = tostring(hatchCount)
+end)
+
+makeToggle("Auto Hatch Fall Event Egg", function(enabled)
     hatchEnabled = enabled
 
     if enabled then
         task.spawn(function()
-            local remote = Network:WaitForChild("SetPendingAutoOpenEgg")
-
             while running and hatchEnabled do
-                safeInvoke(remote, "Fall Event Egg")
-                task.wait(AUTO_OPEN_INTERVAL)
+                safeInvoke(
+                    Network:WaitForChild("OpenEgg"),
+                    "Fall Event Egg",
+                    hatchCount
+                )
+                task.wait(HATCH_INTERVAL)
             end
         end)
 
@@ -275,11 +307,9 @@ makeSection("AUTO BOSSES")
 
 for _, bossName in ipairs(BOSS_NAMES) do
     local button = makeButton(
-        content,
-        bossName .. ": OFF",
+        content, bossName .. ": OFF",
         UDim2.new(1, -2, 0, 27),
-        UDim2.new(),
-        Color3.fromRGB(55, 55, 70)
+        UDim2.new(), Color3.fromRGB(55, 55, 70)
     )
 
     button.MouseButton1Click:Connect(function()
@@ -313,7 +343,7 @@ makeToggle("Auto Bosses", function(enabled)
                     if selectedBosses[bossName] then
                         found = true
 
-                        local success, err = pcall(function()
+                        local ok, err = pcall(function()
                             local bossPart = workspace
                                 :WaitForChild("Map")
                                 :WaitForChild(bossName)
@@ -326,16 +356,12 @@ makeToggle("Auto Bosses", function(enabled)
                                 bossPart
                             )
 
-                            -- Wait only; this does not verify a defeat.
+                            -- This delay does not confirm a defeat.
                             task.wait(BOSS_DELAY)
                         end)
 
-                        if not success then
-                            warn(
-                                "[Auto Control] Boss error:",
-                                bossName,
-                                err
-                            )
+                        if not ok then
+                            warn("[Auto Control] Boss error:", bossName, err)
                         end
 
                         task.wait(1)
@@ -353,7 +379,6 @@ end)
 -- Minimize / restore
 minimizeButton.MouseButton1Click:Connect(function()
     minimized = not minimized
-
     content.Visible = not minimized
     main.Size = minimized
         and UDim2.fromOffset(285, 35)
@@ -369,7 +394,6 @@ closeButton.MouseButton1Click:Connect(function()
     runesEnabled = false
     hatchEnabled = false
     bossesEnabled = false
-
     gui:Destroy()
 end)
 
