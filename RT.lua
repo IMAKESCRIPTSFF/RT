@@ -1,13 +1,13 @@
+
 --// Auto Control GUI
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local Network = ReplicatedStorage:WaitForChild("Network")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Settings
 local HATCH_INTERVAL = 0.2
@@ -44,41 +44,13 @@ for _, bossName in ipairs(BOSS_NAMES) do
     selectedBosses[bossName] = false
 end
 
--- Safe remote invocation
-local function safeInvoke(remote, ...)
-    local args = table.pack(...)
-
-    local success, result = pcall(function()
-        return remote:InvokeServer(
-            table.unpack(args, 1, args.n)
-        )
-    end)
-
-    if not success then
-        warn("[Auto Control] Remote error:", result)
-    end
-
-    return success, result
-end
-
--- Teleport character
-local function teleportCharacter()
-    local character = player.Character
-    local root = character
-        and character:FindFirstChild("HumanoidRootPart")
-
-    if root then
-        root.CFrame = CFrame.new(HATCH_POSITION)
-    end
-end
-
 -- Remove old GUI
 local oldGui = playerGui:FindFirstChild("AutoControlGUI")
 if oldGui then
     oldGui:Destroy()
 end
 
--- GUI setup
+-- GUI setup (created before network checks)
 local gui = Instance.new("ScreenGui")
 gui.Name = "AutoControlGUI"
 gui.ResetOnSpawn = false
@@ -167,7 +139,6 @@ layout.Padding = UDim.new(0, 6)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Parent = content
 
--- Section heading
 local function makeSection(text)
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -2, 0, 22)
@@ -178,11 +149,9 @@ local function makeSection(text)
     label.Font = Enum.Font.GothamBold
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = content
-
     return label
 end
 
--- Toggle creator
 local function makeToggle(text, callback)
     local enabled = false
 
@@ -195,19 +164,15 @@ local function makeToggle(text, callback)
     )
 
     button.MouseButton1Click:Connect(function()
-        if not running then
-            return
-        end
+        if not running then return end
 
         enabled = not enabled
-
         button.Text = text .. (enabled and ": ON" or ": OFF")
         button.BackgroundColor3 = enabled
             and Color3.fromRGB(45, 125, 85)
             or Color3.fromRGB(55, 55, 70)
 
         local ok, err = pcall(callback, enabled)
-
         if not ok then
             warn("[Auto Control] Toggle error:", err)
         end
@@ -216,13 +181,62 @@ local function makeToggle(text, callback)
     return button
 end
 
+-- Network lookup with timeout
+local function getNetwork()
+    return ReplicatedStorage:FindFirstChild("Network")
+end
+
+local function getRemote(name)
+    local network = getNetwork()
+    if not network then
+        warn("[Auto Control] Network folder not found")
+        return nil
+    end
+
+    local remote = network:FindFirstChild(name)
+    if not remote then
+        warn("[Auto Control] Remote not found:", name)
+    end
+
+    return remote
+end
+
+-- Safe remote invocation
+local function safeInvoke(remote, ...)
+    if not remote or not remote:IsA("RemoteFunction") then
+        warn("[Auto Control] Missing RemoteFunction")
+        return false
+    end
+
+    local args = table.pack(...)
+    local success, result = pcall(function()
+        return remote:InvokeServer(table.unpack(args, 1, args.n))
+    end)
+
+    if not success then
+        warn("[Auto Control] Remote error:", result)
+    end
+
+    return success, result
+end
+
+local function teleportCharacter()
+    local character = player.Character
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+
+    if root then
+        root.CFrame = CFrame.new(HATCH_POSITION)
+    end
+end
+
 --// AUTO ACKNOWLEDGE BOSS EXIT
 
 task.spawn(function()
-    local remote = Network:WaitForChild("AcknowledgeBossExit")
-
     while running do
-        safeInvoke(remote)
+        local remote = getRemote("AcknowledgeBossExit")
+        if remote then
+            safeInvoke(remote)
+        end
         task.wait(ACKNOWLEDGE_INTERVAL)
     end
 end)
@@ -231,32 +245,28 @@ end)
 
 makeSection("GENERAL")
 
--- Auto Tap
 makeToggle("Auto Tap", function(enabled)
     tapEnabled = enabled
+    if not enabled then return end
 
-    if enabled then
-        task.spawn(function()
-            while running and tapEnabled do
-                safeInvoke(Network:WaitForChild("Tap"))
-                task.wait(TAP_INTERVAL)
-            end
-        end)
-    end
+    task.spawn(function()
+        while running and tapEnabled do
+            safeInvoke(getRemote("Tap"))
+            task.wait(TAP_INTERVAL)
+        end
+    end)
 end)
 
--- Equip Best Runes
 makeToggle("Equip Best Runes", function(enabled)
     runesEnabled = enabled
+    if not enabled then return end
 
-    if enabled then
-        task.spawn(function()
-            while running and runesEnabled do
-                safeInvoke(Network:WaitForChild("EquipBestRunes"))
-                task.wait(RUNE_INTERVAL)
-            end
-        end)
-    end
+    task.spawn(function()
+        while running and runesEnabled do
+            safeInvoke(getRemote("EquipBestRunes"))
+            task.wait(RUNE_INTERVAL)
+        end
+    end)
 end)
 
 --// AUTO HATCH
@@ -265,38 +275,35 @@ makeSection("AUTO HATCH")
 
 makeToggle("Auto Hatch (T Key)", function(enabled)
     hatchEnabled = enabled
+    if not enabled then return end
 
-    if enabled then
-        task.spawn(function()
-            while running and hatchEnabled do
-                local success, err = pcall(function()
-                    VirtualInputManager:SendKeyEvent(
-                        true, Enum.KeyCode.T, false, game
-                    )
+    task.spawn(function()
+        while running and hatchEnabled do
+            local ok, err = pcall(function()
+                VirtualInputManager:SendKeyEvent(
+                    true, Enum.KeyCode.T, false, game
+                )
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(
+                    false, Enum.KeyCode.T, false, game
+                )
+            end)
 
-                    task.wait(0.05)
-
-                    VirtualInputManager:SendKeyEvent(
-                        false, Enum.KeyCode.T, false, game
-                    )
-                end)
-
-                if not success then
-                    warn("[Auto Control] T key simulation failed:", err)
-                    break
-                end
-
-                task.wait(HATCH_INTERVAL)
+            if not ok then
+                warn("[Auto Control] T key simulation failed:", err)
+                break
             end
-        end)
 
-        task.spawn(function()
-            while running and hatchEnabled do
-                teleportCharacter()
-                task.wait(TELEPORT_INTERVAL)
-            end
-        end)
-    end
+            task.wait(HATCH_INTERVAL)
+        end
+    end)
+
+    task.spawn(function()
+        while running and hatchEnabled do
+            teleportCharacter()
+            task.wait(TELEPORT_INTERVAL)
+        end
+    end)
 end)
 
 --// AUTO OPEN KEYS
@@ -305,18 +312,17 @@ makeSection("AUTO OPEN KEYS")
 
 makeToggle("Auto Open Keys", function(enabled)
     chestEnabled = enabled
+    if not enabled then return end
 
-    if enabled then
-        task.spawn(function()
-            local chestRemote =
-                Network:WaitForChild("Open Universal Chest")
-
-            while running and chestEnabled do
-                safeInvoke(chestRemote, "Ancient Oasis Chest", 1)
-                task.wait(CHEST_INTERVAL)
+    task.spawn(function()
+        while running and chestEnabled do
+            local remote = getRemote("Open Universal Chest")
+            if remote then
+                safeInvoke(remote, "Ancient Oasis Chest", 1)
             end
-        end)
-    end
+            task.wait(CHEST_INTERVAL)
+        end
+    end)
 end)
 
 --// AUTO MERCHANT
@@ -325,24 +331,20 @@ makeSection("AUTO MERCHANT")
 
 makeToggle("Auto Buy Merchant", function(enabled)
     merchantEnabled = enabled
+    if not enabled then return end
 
-    if enabled then
-        task.spawn(function()
-            local merchantRemote =
-                Network:WaitForChild("BuyMerchantItem")
-
-            while running and merchantEnabled do
-                for merchantId = 1, 3 do
-                    if not running or not merchantEnabled then
-                        break
-                    end
-
-                    safeInvoke(merchantRemote, merchantId)
-                    task.wait(MERCHANT_INTERVAL)
+    task.spawn(function()
+        while running and merchantEnabled do
+            for merchantId = 1, 3 do
+                if not running or not merchantEnabled then
+                    break
                 end
+
+                safeInvoke(getRemote("BuyMerchantItem"), merchantId)
+                task.wait(MERCHANT_INTERVAL)
             end
-        end)
-    end
+        end
+    end)
 end)
 
 --// AUTO BOSSES
@@ -359,12 +361,9 @@ for _, bossName in ipairs(BOSS_NAMES) do
     )
 
     button.MouseButton1Click:Connect(function()
-        if not running then
-            return
-        end
+        if not running then return end
 
         selectedBosses[bossName] = not selectedBosses[bossName]
-
         local selected = selectedBosses[bossName]
 
         button.Text = bossName .. (selected and ": ON" or ": OFF")
@@ -376,57 +375,51 @@ end
 
 makeToggle("Auto Bosses", function(enabled)
     bossesEnabled = enabled
+    if not enabled then return end
 
-    if enabled then
-        task.spawn(function()
-            while running and bossesEnabled do
-                local found = false
+    task.spawn(function()
+        while running and bossesEnabled do
+            local found = false
 
-                for _, bossName in ipairs(BOSS_NAMES) do
-                    if not running or not bossesEnabled then
-                        break
-                    end
+            for _, bossName in ipairs(BOSS_NAMES) do
+                if not running or not bossesEnabled then break end
 
-                    if selectedBosses[bossName] then
-                        found = true
+                if selectedBosses[bossName] then
+                    found = true
 
-                        local ok, err = pcall(function()
-                            local bossPart = workspace
-                                :WaitForChild("Map")
-                                :WaitForChild(bossName)
-                                :WaitForChild("Boss")
-                                :WaitForChild("Walls")
-                                :WaitForChild("Part")
+                    local ok, err = pcall(function()
+                        local map = workspace:FindFirstChild("Map")
+                        local area = map and map:FindFirstChild(bossName)
+                        local boss = area and area:FindFirstChild("Boss")
+                        local walls = boss and boss:FindFirstChild("Walls")
+                        local bossPart = walls and walls:FindFirstChild("Part")
 
-                            safeInvoke(
-                                Network:WaitForChild("RequestStartBossFight"),
-                                bossPart
-                            )
-
-                            task.wait(BOSS_DELAY)
-                        end)
-
-                        if not ok then
-                            warn("[Auto Control] Boss error:", bossName, err)
+                        if not bossPart then
+                            warn("[Auto Control] Boss part not found:", bossName)
+                            return
                         end
 
-                        task.wait(1)
-                    end
-                end
+                        safeInvoke(getRemote("RequestStartBossFight"), bossPart)
+                        task.wait(BOSS_DELAY)
+                    end)
 
-                if not found then
-                    task.wait(0.5)
+                    if not ok then
+                        warn("[Auto Control] Boss error:", bossName, err)
+                    end
+
+                    task.wait(1)
                 end
             end
-        end)
-    end
-end
+
+            if not found then task.wait(0.5) end
+        end
+    end)
+end)
 
 --// MINIMIZE / RESTORE
 
 minimizeButton.MouseButton1Click:Connect(function()
     minimized = not minimized
-
     content.Visible = not minimized
 
     main.Size = minimized
@@ -440,14 +433,12 @@ end)
 
 closeButton.MouseButton1Click:Connect(function()
     running = false
-
     tapEnabled = false
     runesEnabled = false
     hatchEnabled = false
     chestEnabled = false
     bossesEnabled = false
     merchantEnabled = false
-
     gui:Destroy()
 end)
 
