@@ -1,6 +1,4 @@
---// Auto Control GUI
 
--- Services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -17,13 +15,12 @@ if not playerGui then
     return
 end
 
--- Optional service for Auto Hatch
 local VirtualInputManager
 pcall(function()
     VirtualInputManager = game:GetService("VirtualInputManager")
 end)
 
--- Settings
+
 local HATCH_INTERVAL = 0.2
 local TELEPORT_INTERVAL = 3
 local CHEST_INTERVAL = 0.1
@@ -43,7 +40,7 @@ local BOSS_NAMES = {
     "Inferno Spire"
 }
 
--- State
+
 local running = true
 local tapEnabled = true
 local runesEnabled = true
@@ -58,13 +55,12 @@ for _, bossName in ipairs(BOSS_NAMES) do
     selectedBosses[bossName] = false
 end
 
--- Remove previous GUI
+
 local oldGui = playerGui:FindFirstChild("AutoControlGUI")
 if oldGui then
     oldGui:Destroy()
 end
 
--- GUI is created before automation starts
 local gui = Instance.new("ScreenGui")
 gui.Name = "AutoControlGUI"
 gui.ResetOnSpawn = false
@@ -206,7 +202,6 @@ local function makeToggle(text, callback, startEnabled)
     return button
 end
 
--- Network helpers
 local function getRemote(name)
     local network = ReplicatedStorage:FindFirstChild("Network")
     return network and network:FindFirstChild(name)
@@ -238,7 +233,6 @@ local function teleportCharacter()
     end
 end
 
--- Auto acknowledge boss exit
 task.spawn(function()
     while running do
         safeInvoke(getRemote("AcknowledgeBossExit"))
@@ -246,7 +240,6 @@ task.spawn(function()
     end
 end)
 
--- GENERAL
 makeSection("GENERAL")
 
 makeToggle("Auto Tap", function(enabled)
@@ -273,7 +266,6 @@ makeToggle("Equip Best Runes", function(enabled)
     end)
 end, true)
 
--- AUTO HATCH
 makeSection("AUTO HATCH")
 
 makeToggle("Auto Hatch (T Key)", function(enabled)
@@ -314,7 +306,6 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     end)
 end)
 
--- AUTO OPEN KEYS
 makeSection("AUTO OPEN KEYS")
 
 makeToggle("Auto Open Keys", function(enabled)
@@ -333,7 +324,6 @@ makeToggle("Auto Open Keys", function(enabled)
     end)
 end)
 
--- AUTO MERCHANT
 makeSection("AUTO MERCHANT")
 
 makeToggle("Auto Buy Merchant", function(enabled)
@@ -354,7 +344,6 @@ makeToggle("Auto Buy Merchant", function(enabled)
     end)
 end)
 
--- AUTO BOSSES
 makeSection("AUTO BOSSES")
 
 for _, bossName in ipairs(BOSS_NAMES) do
@@ -428,7 +417,6 @@ makeToggle("Auto Bosses", function(enabled)
     end)
 end)
 
--- MINIMIZE / RESTORE
 minimizeButton.MouseButton1Click:Connect(function()
     minimized = not minimized
     content.Visible = not minimized
@@ -440,7 +428,6 @@ minimizeButton.MouseButton1Click:Connect(function()
     minimizeButton.Text = minimized and "+" or "-"
 end)
 
--- CLOSE / UNLOAD
 closeButton.MouseButton1Click:Connect(function()
     running = false
     tapEnabled = false
@@ -452,7 +439,6 @@ closeButton.MouseButton1Click:Connect(function()
     gui:Destroy()
 end)
 
--- DRAGGING
 local dragging = false
 local dragStart
 local startPosition
@@ -489,4 +475,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[Auto Control] GUI loaded successfully.")
+print("GUI loaded successfully.")
