@@ -1,4 +1,10 @@
+--// GAME ID RESTRICTION
+if game.PlaceId ~= 115161798722315 then
+    warn("[Auto Control] Wrong game ID. Script stopped.")
+    return
+end
 
+--// SERVICES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -20,7 +26,7 @@ pcall(function()
     VirtualInputManager = game:GetService("VirtualInputManager")
 end)
 
-
+--// SETTINGS
 local HATCH_INTERVAL = 0.2
 local TELEPORT_INTERVAL = 3
 local CHEST_INTERVAL = 0.1
@@ -40,14 +46,14 @@ local BOSS_NAMES = {
     "Inferno Spire"
 }
 
-
+--// STATE
 local running = true
 local tapEnabled = true
 local runesEnabled = true
 local hatchEnabled = false
 local chestEnabled = false
 local bossesEnabled = false
-local merchantEnabled = false
+local merchantEnabled = true
 local minimized = false
 local selectedBosses = {}
 
@@ -55,12 +61,15 @@ for _, bossName in ipairs(BOSS_NAMES) do
     selectedBosses[bossName] = false
 end
 
-
-local oldGui = playerGui:FindFirstChild("AutoControlGUI")
-if oldGui then
-    oldGui:Destroy()
+--// REMOVE OLD GUI
+for _, guiName in ipairs({"AutoControlGUI", "GUI"}) do
+    local oldGui = playerGui:FindFirstChild(guiName)
+    if oldGui then
+        oldGui:Destroy()
+    end
 end
 
+--// MAIN GUI
 local gui = Instance.new("ScreenGui")
 gui.Name = "GUI"
 gui.ResetOnSpawn = false
@@ -102,6 +111,7 @@ title.TextSize = 15
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = topBar
 
+--// BUTTON CREATOR
 local function makeButton(parent, text, size, position, color)
     local button = Instance.new("TextButton")
     button.Size = size
@@ -132,6 +142,7 @@ local closeButton = makeButton(
     Color3.fromRGB(150, 45, 50)
 )
 
+--// SCROLLING CONTENT
 local content = Instance.new("ScrollingFrame")
 content.Name = "Content"
 content.Position = UDim2.fromOffset(8, 42)
@@ -161,6 +172,7 @@ local function makeSection(text)
     return label
 end
 
+--// TOGGLE CREATOR
 local function makeToggle(text, callback, startEnabled)
     local enabled = startEnabled == true
 
@@ -177,6 +189,7 @@ local function makeToggle(text, callback, startEnabled)
         if not running then return end
 
         enabled = not enabled
+
         button.Text = text .. (enabled and ": ON" or ": OFF")
         button.BackgroundColor3 = enabled
             and Color3.fromRGB(45, 125, 85)
@@ -202,6 +215,7 @@ local function makeToggle(text, callback, startEnabled)
     return button
 end
 
+--// REMOTE HELPERS
 local function getRemote(name)
     local network = ReplicatedStorage:FindFirstChild("Network")
     return network and network:FindFirstChild(name)
@@ -213,6 +227,7 @@ local function safeInvoke(remote, ...)
     end
 
     local args = table.pack(...)
+
     local success, result = pcall(function()
         return remote:InvokeServer(table.unpack(args, 1, args.n))
     end)
@@ -233,6 +248,7 @@ local function teleportCharacter()
     end
 end
 
+--// AUTO ACKNOWLEDGE BOSS EXIT
 task.spawn(function()
     while running do
         safeInvoke(getRemote("AcknowledgeBossExit"))
@@ -240,6 +256,7 @@ task.spawn(function()
     end
 end)
 
+--// GENERAL
 makeSection("GENERAL")
 
 makeToggle("Auto Tap", function(enabled)
@@ -266,6 +283,7 @@ makeToggle("Equip Best Runes", function(enabled)
     end)
 end, true)
 
+--// AUTO HATCH
 makeSection("AUTO HATCH")
 
 makeToggle("Auto Hatch (T Key)", function(enabled)
@@ -306,6 +324,7 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     end)
 end)
 
+--// AUTO OPEN KEYS
 makeSection("AUTO OPEN KEYS")
 
 makeToggle("Auto Open Keys", function(enabled)
@@ -319,11 +338,13 @@ makeToggle("Auto Open Keys", function(enabled)
                 "Ancient Oasis Chest",
                 1
             )
+
             task.wait(CHEST_INTERVAL)
         end
     end)
 end)
 
+--// AUTO MERCHANT — ENABLED ON STARTUP
 makeSection("AUTO MERCHANT")
 
 makeToggle("Auto Buy Merchant", function(enabled)
@@ -342,8 +363,9 @@ makeToggle("Auto Buy Merchant", function(enabled)
             end
         end
     end)
-end)
+end, true)
 
+--// BOSS SELECTION
 makeSection("AUTO BOSSES")
 
 for _, bossName in ipairs(BOSS_NAMES) do
@@ -377,7 +399,9 @@ makeToggle("Auto Bosses", function(enabled)
             local found = false
 
             for _, bossName in ipairs(BOSS_NAMES) do
-                if not running or not bossesEnabled then break end
+                if not running or not bossesEnabled then
+                    break
+                end
 
                 if selectedBosses[bossName] then
                     found = true
@@ -417,6 +441,7 @@ makeToggle("Auto Bosses", function(enabled)
     end)
 end)
 
+--// MINIMIZE
 minimizeButton.MouseButton1Click:Connect(function()
     minimized = not minimized
     content.Visible = not minimized
@@ -428,6 +453,7 @@ minimizeButton.MouseButton1Click:Connect(function()
     minimizeButton.Text = minimized and "+" or "-"
 end)
 
+--// UNLOAD
 closeButton.MouseButton1Click:Connect(function()
     running = false
     tapEnabled = false
@@ -436,9 +462,11 @@ closeButton.MouseButton1Click:Connect(function()
     chestEnabled = false
     bossesEnabled = false
     merchantEnabled = false
+
     gui:Destroy()
 end)
 
+--// DRAGGING
 local dragging = false
 local dragStart
 local startPosition
@@ -475,4 +503,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("GUI loaded successfully.")
+print("[Auto Control] GUI loaded successfully.")
