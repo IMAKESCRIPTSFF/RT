@@ -36,7 +36,7 @@ local ACKNOWLEDGE_INTERVAL = 5
 local BOSS_DELAY = 3
 local MERCHANT_INTERVAL = 1
 
-local HATCH_POSITION = Vector3.new(-252, 5, 494)
+local HATCH_POSITION = Vector3.new(-173, 104, -372)
 
 local BOSS_NAMES = {
     "Autumn Forest",
