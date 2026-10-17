@@ -1,13 +1,27 @@
-
 --// Auto Control GUI
 
+-- Services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+while not player do
+    task.wait(0.25)
+    player = Players.LocalPlayer
+end
+
+local playerGui = player:WaitForChild("PlayerGui", 15)
+if not playerGui then
+    warn("[Auto Control] PlayerGui not available.")
+    return
+end
+
+-- Optional service for Auto Hatch
+local VirtualInputManager
+pcall(function()
+    VirtualInputManager = game:GetService("VirtualInputManager")
+end)
 
 -- Settings
 local HATCH_INTERVAL = 0.2
@@ -31,8 +45,8 @@ local BOSS_NAMES = {
 
 -- State
 local running = true
-local tapEnabled = false
-local runesEnabled = false
+local tapEnabled = true
+local runesEnabled = true
 local hatchEnabled = false
 local chestEnabled = false
 local bossesEnabled = false
@@ -44,16 +58,17 @@ for _, bossName in ipairs(BOSS_NAMES) do
     selectedBosses[bossName] = false
 end
 
--- Remove old GUI
+-- Remove previous GUI
 local oldGui = playerGui:FindFirstChild("AutoControlGUI")
 if oldGui then
     oldGui:Destroy()
 end
 
--- GUI setup (created before network checks)
+-- GUI is created before automation starts
 local gui = Instance.new("ScreenGui")
 gui.Name = "AutoControlGUI"
 gui.ResetOnSpawn = false
+gui.DisplayOrder = 100
 gui.Parent = playerGui
 
 local main = Instance.new("Frame")
@@ -65,13 +80,13 @@ main.BorderSizePixel = 0
 main.Active = true
 main.Parent = gui
 
-local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 9)
-mainCorner.Parent = main
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 9)
+corner.Parent = main
 
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(75, 75, 95)
-mainStroke.Parent = main
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(75, 75, 95)
+stroke.Parent = main
 
 local topBar = Instance.new("Frame")
 topBar.Size = UDim2.new(1, 0, 0, 35)
@@ -91,7 +106,6 @@ title.TextSize = 15
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = topBar
 
--- Button creator
 local function makeButton(parent, text, size, position, color)
     local button = Instance.new("TextButton")
     button.Size = size
@@ -104,9 +118,9 @@ local function makeButton(parent, text, size, position, color)
     button.Font = Enum.Font.GothamBold
     button.Parent = parent
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 5)
-    corner.Parent = button
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 5)
+    buttonCorner.Parent = button
 
     return button
 end
@@ -122,7 +136,6 @@ local closeButton = makeButton(
     Color3.fromRGB(150, 45, 50)
 )
 
--- Scrollable content
 local content = Instance.new("ScrollingFrame")
 content.Name = "Content"
 content.Position = UDim2.fromOffset(8, 42)
@@ -152,15 +165,16 @@ local function makeSection(text)
     return label
 end
 
-local function makeToggle(text, callback)
-    local enabled = false
+local function makeToggle(text, callback, startEnabled)
+    local enabled = startEnabled == true
 
     local button = makeButton(
         content,
-        text .. ": OFF",
+        text .. (enabled and ": ON" or ": OFF"),
         UDim2.new(1, -2, 0, 30),
         UDim2.new(),
-        Color3.fromRGB(55, 55, 70)
+        enabled and Color3.fromRGB(45, 125, 85)
+            or Color3.fromRGB(55, 55, 70)
     )
 
     button.MouseButton1Click:Connect(function()
@@ -178,33 +192,28 @@ local function makeToggle(text, callback)
         end
     end)
 
+    if enabled then
+        task.defer(function()
+            if running then
+                local ok, err = pcall(callback, true)
+                if not ok then
+                    warn("[Auto Control] Startup error:", err)
+                end
+            end
+        end)
+    end
+
     return button
 end
 
--- Network lookup with timeout
-local function getNetwork()
-    return ReplicatedStorage:FindFirstChild("Network")
-end
-
+-- Network helpers
 local function getRemote(name)
-    local network = getNetwork()
-    if not network then
-        warn("[Auto Control] Network folder not found")
-        return nil
-    end
-
-    local remote = network:FindFirstChild(name)
-    if not remote then
-        warn("[Auto Control] Remote not found:", name)
-    end
-
-    return remote
+    local network = ReplicatedStorage:FindFirstChild("Network")
+    return network and network:FindFirstChild(name)
 end
 
--- Safe remote invocation
 local function safeInvoke(remote, ...)
     if not remote or not remote:IsA("RemoteFunction") then
-        warn("[Auto Control] Missing RemoteFunction")
         return false
     end
 
@@ -229,20 +238,15 @@ local function teleportCharacter()
     end
 end
 
---// AUTO ACKNOWLEDGE BOSS EXIT
-
+-- Auto acknowledge boss exit
 task.spawn(function()
     while running do
-        local remote = getRemote("AcknowledgeBossExit")
-        if remote then
-            safeInvoke(remote)
-        end
+        safeInvoke(getRemote("AcknowledgeBossExit"))
         task.wait(ACKNOWLEDGE_INTERVAL)
     end
 end)
 
---// GENERAL
-
+-- GENERAL
 makeSection("GENERAL")
 
 makeToggle("Auto Tap", function(enabled)
@@ -255,7 +259,7 @@ makeToggle("Auto Tap", function(enabled)
             task.wait(TAP_INTERVAL)
         end
     end)
-end)
+end, true)
 
 makeToggle("Equip Best Runes", function(enabled)
     runesEnabled = enabled
@@ -267,31 +271,35 @@ makeToggle("Equip Best Runes", function(enabled)
             task.wait(RUNE_INTERVAL)
         end
     end)
-end)
+end, true)
 
---// AUTO HATCH
-
+-- AUTO HATCH
 makeSection("AUTO HATCH")
 
 makeToggle("Auto Hatch (T Key)", function(enabled)
     hatchEnabled = enabled
     if not enabled then return end
 
+    if not VirtualInputManager then
+        warn("[Auto Control] VirtualInputManager unavailable; Auto Hatch key input may not work.")
+    end
+
     task.spawn(function()
         while running and hatchEnabled do
-            local ok, err = pcall(function()
-                VirtualInputManager:SendKeyEvent(
-                    true, Enum.KeyCode.T, false, game
-                )
-                task.wait(0.05)
-                VirtualInputManager:SendKeyEvent(
-                    false, Enum.KeyCode.T, false, game
-                )
-            end)
+            if VirtualInputManager then
+                local ok, err = pcall(function()
+                    VirtualInputManager:SendKeyEvent(
+                        true, Enum.KeyCode.T, false, game
+                    )
+                    task.wait(0.05)
+                    VirtualInputManager:SendKeyEvent(
+                        false, Enum.KeyCode.T, false, game
+                    )
+                end)
 
-            if not ok then
-                warn("[Auto Control] T key simulation failed:", err)
-                break
+                if not ok then
+                    warn("[Auto Control] T key simulation failed:", err)
+                end
             end
 
             task.wait(HATCH_INTERVAL)
@@ -306,8 +314,7 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     end)
 end)
 
---// AUTO OPEN KEYS
-
+-- AUTO OPEN KEYS
 makeSection("AUTO OPEN KEYS")
 
 makeToggle("Auto Open Keys", function(enabled)
@@ -316,17 +323,17 @@ makeToggle("Auto Open Keys", function(enabled)
 
     task.spawn(function()
         while running and chestEnabled do
-            local remote = getRemote("Open Universal Chest")
-            if remote then
-                safeInvoke(remote, "Ancient Oasis Chest", 1)
-            end
+            safeInvoke(
+                getRemote("Open Universal Chest"),
+                "Ancient Oasis Chest",
+                1
+            )
             task.wait(CHEST_INTERVAL)
         end
     end)
 end)
 
---// AUTO MERCHANT
-
+-- AUTO MERCHANT
 makeSection("AUTO MERCHANT")
 
 makeToggle("Auto Buy Merchant", function(enabled)
@@ -347,8 +354,7 @@ makeToggle("Auto Buy Merchant", function(enabled)
     end)
 end)
 
---// AUTO BOSSES
-
+-- AUTO BOSSES
 makeSection("AUTO BOSSES")
 
 for _, bossName in ipairs(BOSS_NAMES) do
@@ -399,7 +405,11 @@ makeToggle("Auto Bosses", function(enabled)
                             return
                         end
 
-                        safeInvoke(getRemote("RequestStartBossFight"), bossPart)
+                        safeInvoke(
+                            getRemote("RequestStartBossFight"),
+                            bossPart
+                        )
+
                         task.wait(BOSS_DELAY)
                     end)
 
@@ -411,13 +421,14 @@ makeToggle("Auto Bosses", function(enabled)
                 end
             end
 
-            if not found then task.wait(0.5) end
+            if not found then
+                task.wait(0.5)
+            end
         end
     end)
 end)
 
---// MINIMIZE / RESTORE
-
+-- MINIMIZE / RESTORE
 minimizeButton.MouseButton1Click:Connect(function()
     minimized = not minimized
     content.Visible = not minimized
@@ -429,8 +440,7 @@ minimizeButton.MouseButton1Click:Connect(function()
     minimizeButton.Text = minimized and "+" or "-"
 end)
 
---// CLOSE / UNLOAD
-
+-- CLOSE / UNLOAD
 closeButton.MouseButton1Click:Connect(function()
     running = false
     tapEnabled = false
@@ -442,8 +452,7 @@ closeButton.MouseButton1Click:Connect(function()
     gui:Destroy()
 end)
 
---// DRAGGING
-
+-- DRAGGING
 local dragging = false
 local dragStart
 local startPosition
