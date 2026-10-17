@@ -11,7 +11,7 @@ end
 
 local playerGui = player:WaitForChild("PlayerGui", 15)
 if not playerGui then
-    warn("[Auto Control] PlayerGui not available.")
+    warn("Player Gui not available.")
     return
 end
 
@@ -62,7 +62,7 @@ if oldGui then
 end
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "AutoControlGUI"
+gui.Name = "GUI"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 100
 gui.Parent = playerGui
@@ -184,7 +184,7 @@ local function makeToggle(text, callback, startEnabled)
 
         local ok, err = pcall(callback, enabled)
         if not ok then
-            warn("[Auto Control] Toggle error:", err)
+            warn("GUI Toggle error:", err)
         end
     end)
 
@@ -193,7 +193,7 @@ local function makeToggle(text, callback, startEnabled)
             if running then
                 local ok, err = pcall(callback, true)
                 if not ok then
-                    warn("[Auto Control] Startup error:", err)
+                    warn("GUI Startup error:", err)
                 end
             end
         end)
@@ -218,7 +218,7 @@ local function safeInvoke(remote, ...)
     end)
 
     if not success then
-        warn("[Auto Control] Remote error:", result)
+        warn("GUI Remote error:", result)
     end
 
     return success, result
@@ -273,7 +273,7 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
     if not enabled then return end
 
     if not VirtualInputManager then
-        warn("[Auto Control] VirtualInputManager unavailable; Auto Hatch key input may not work.")
+        warn("GUI VirtualInputManager unavailable; Auto Hatch key input may not work.")
     end
 
     task.spawn(function()
@@ -290,7 +290,7 @@ makeToggle("Auto Hatch (T Key)", function(enabled)
                 end)
 
                 if not ok then
-                    warn("[Auto Control] T key simulation failed:", err)
+                    warn("GUI T key simulation failed:", err)
                 end
             end
 
@@ -390,7 +390,7 @@ makeToggle("Auto Bosses", function(enabled)
                         local bossPart = walls and walls:FindFirstChild("Part")
 
                         if not bossPart then
-                            warn("[Auto Control] Boss part not found:", bossName)
+                            warn("GUI Boss part not found:", bossName)
                             return
                         end
 
@@ -403,7 +403,7 @@ makeToggle("Auto Bosses", function(enabled)
                     end)
 
                     if not ok then
-                        warn("[Auto Control] Boss error:", bossName, err)
+                        warn("GUI Boss error:", bossName, err)
                     end
 
                     task.wait(1)
