@@ -8,6 +8,7 @@ end
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 while not player do
@@ -54,6 +55,8 @@ local hatchEnabled = false
 local chestEnabled = false
 local bossesEnabled = false
 local merchantEnabled = true
+local autoBreakEnabled = false
+local breakableDetectionConnection = nil
 local minimized = false
 local selectedBosses = {}
 
@@ -248,6 +251,87 @@ local function teleportCharacter()
     end
 end
 
+--// AUTO BREAK ID DISCOVERY
+local damageBreakableRemote = ReplicatedStorage
+    :WaitForChild("Network")
+    :WaitForChild("DamageBreakable")
+
+local knownBreakableIds = {}
+local pendingBreakableObjects = {}
+local breakableIdQueue = {}
+local breakableQueueIndex = 1
+
+local function getBreakableId(obj)
+    for _, key in ipairs({"ID", "Id", "id", "BreakableId"}) do
+        local attr = obj:GetAttribute(key)
+        if typeof(attr) == "number" then
+            return attr
+        end
+
+        local child = obj:FindFirstChild(key)
+        if child and child:IsA("ValueBase")
+            and typeof(child.Value) == "number" then
+            return child.Value
+        end
+    end
+end
+
+local function registerBreakable(obj)
+    if pendingBreakableObjects[obj] then
+        return
+    end
+
+    pendingBreakableObjects[obj] = true
+
+    task.spawn(function()
+        for _ = 1, 20 do
+            if not running or not obj.Parent then
+                break
+            end
+
+            local id = getBreakableId(obj)
+            if id ~= nil then
+                if not knownBreakableIds[id] then
+                    knownBreakableIds[id] = true
+                    table.insert(breakableIdQueue, id)
+                end
+                break
+            end
+
+            task.wait(0.1)
+        end
+
+        pendingBreakableObjects[obj] = nil
+    end)
+end
+
+-- Scan current objects once, then only register newly added descendants.
+for _, obj in ipairs(Workspace:GetDescendants()) do
+    registerBreakable(obj)
+end
+
+breakableDetectionConnection = Workspace.DescendantAdded:Connect(registerBreakable)
+
+-- One damage loop; requests are spaced by 0.01 seconds while Auto Break is enabled.
+task.spawn(function()
+    while running do
+        if not autoBreakEnabled or breakableQueueIndex > #breakableIdQueue then
+            task.wait(0.1)
+        else
+            local id = breakableIdQueue[breakableQueueIndex]
+            breakableQueueIndex += 1
+
+            if autoBreakEnabled then
+                pcall(function()
+                    damageBreakableRemote:FireServer(id)
+                end)
+            end
+
+            task.wait(0.01)
+        end
+    end
+end)
+
 --// AUTO ACKNOWLEDGE BOSS EXIT
 task.spawn(function()
     while running do
@@ -281,6 +365,11 @@ makeToggle("Equip Best Runes", function(enabled)
             task.wait(RUNE_INTERVAL)
         end
     end)
+end, true)
+
+--// AUTO BREAK — ENABLED ON STARTUP
+makeToggle("Auto Break", function(enabled)
+    autoBreakEnabled = enabled
 end, true)
 
 --// AUTO HATCH
@@ -462,6 +551,12 @@ closeButton.MouseButton1Click:Connect(function()
     chestEnabled = false
     bossesEnabled = false
     merchantEnabled = false
+    autoBreakEnabled = false
+
+    if breakableDetectionConnection then
+        breakableDetectionConnection:Disconnect()
+        breakableDetectionConnection = nil
+    end
 
     gui:Destroy()
 end)
