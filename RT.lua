@@ -252,39 +252,58 @@ local function teleportCharacter()
     end
 end
 
---// AUTO BREAK ID DISCOVERY
+--// AUTO BREAK — LIGHTWEIGHT TRACKING
 local damageBreakableRemote = ReplicatedStorage
     :WaitForChild("Network")
     :WaitForChild("DamageBreakable")
 
-local knownBreakableIds = {}
-local pendingBreakableObjects = {}
+-- 0.05 seconds = 20 requests/sec while active. Avoids the heavy 0.01s spam loop.
+local BREAK_HIT_INTERVAL = 0.05
+local ID_KEYS = {"ID", "Id", "id", "BreakableId"}
+local HEALTH_KEYS = {"Health", "HP", "CurrentHealth", "CurrentHP"}
+
 local breakableIdQueue = {}
-local breakableQueueIndex = 1
+local queuedIds = {}
+local queueIndex = 1
 local objectBreakableIds = {}
 local breakableObjectsById = {}
 
-local function getBreakableId(obj)
-    for _, key in ipairs({"ID", "Id", "id", "BreakableId"}) do
+local function getNumericValue(obj, key)
+    local ok, value = pcall(function()
         local attr = obj:GetAttribute(key)
         if typeof(attr) == "number" then
             return attr
         end
 
         local child = obj:FindFirstChild(key)
-        if child and child:IsA("ValueBase")
-            and typeof(child.Value) == "number" then
+        if child and child:IsA("ValueBase") and typeof(child.Value) == "number" then
             return child.Value
         end
+        return nil
+    end)
+    if ok then return value end
+    return nil
+end
+
+local function getBreakableId(obj)
+    for _, key in ipairs(ID_KEYS) do
+        local id = getNumericValue(obj, key)
+        if id ~= nil then return id end
     end
+    return nil
+end
+
+local function getHealth(obj)
+    for _, key in ipairs(HEALTH_KEYS) do
+        local health = getNumericValue(obj, key)
+        if health ~= nil then return health end
+    end
+    return nil
 end
 
 local function trackBreakableObject(obj, id)
-    if objectBreakableIds[obj] == id then
-        return
-    end
+    if objectBreakableIds[obj] == id then return end
 
-    -- If this object was previously associated with another ID, remove that link.
     local oldId = objectBreakableIds[obj]
     if oldId ~= nil and breakableObjectsById[oldId] then
         breakableObjectsById[oldId][obj] = nil
@@ -294,93 +313,108 @@ local function trackBreakableObject(obj, id)
     breakableObjectsById[id] = breakableObjectsById[id] or {}
     breakableObjectsById[id][obj] = true
 
-    if not knownBreakableIds[id] then
-        knownBreakableIds[id] = true
+    -- Queue an ID again if it respawns after its previous turn.
+    if not queuedIds[id] then
+        queuedIds[id] = true
         table.insert(breakableIdQueue, id)
     end
 end
 
-local function registerBreakable(obj)
-    if pendingBreakableObjects[obj] then
-        return
-    end
+local function tryTrack(obj)
+    if not obj or obj == Workspace then return end
 
-    pendingBreakableObjects[obj] = true
-
-    task.spawn(function()
-        for _ = 1, 20 do
-            if not running or not obj.Parent then
-                break
-            end
-
-            local id = getBreakableId(obj)
-            if id ~= nil then
-                trackBreakableObject(obj, id)
-                break
-            end
-
-            task.wait(0.1)
+    -- Check this instance and a few ancestors. IDs are often stored on a Model
+    -- while DescendantAdded fires for one of its children.
+    local current = obj
+    for _ = 1, 4 do
+        if not current or current == Workspace then break end
+        local id = getBreakableId(current)
+        if id ~= nil then
+            trackBreakableObject(current, id)
+            return
         end
-
-        pendingBreakableObjects[obj] = nil
-    end)
+        current = current.Parent
+    end
 end
 
-local function unregisterBreakable(obj)
+local function unregisterBreakableObject(obj)
     local id = objectBreakableIds[obj]
     if id ~= nil then
         objectBreakableIds[obj] = nil
         local objects = breakableObjectsById[id]
-        if objects then
-            objects[obj] = nil
-        end
+        if objects then objects[obj] = nil end
     end
 end
 
--- Scan current objects once, then listen for newly added/removed objects.
-for _, obj in ipairs(Workspace:GetDescendants()) do
-    registerBreakable(obj)
-end
+-- One batched initial scan. Yield periodically so joining the game does not freeze.
+task.spawn(function()
+    local descendants = Workspace:GetDescendants()
+    for i, obj in ipairs(descendants) do
+        if not running then return end
+        tryTrack(obj)
+        if i % 300 == 0 then task.wait() end
+    end
+end)
 
-breakableDetectionConnection = Workspace.DescendantAdded:Connect(registerBreakable)
-breakableRemovalConnection = Workspace.DescendantRemoving:Connect(unregisterBreakable)
+breakableDetectionConnection = Workspace.DescendantAdded:Connect(function(obj)
+    tryTrack(obj)
+end)
+breakableRemovalConnection = Workspace.DescendantRemoving:Connect(function(obj)
+    unregisterBreakableObject(obj)
+end)
 
--- Keep attacking the current ID until all tracked objects with that ID are removed.
--- Only then advance to the next discovered ID.
+-- Sequentially hit one ID until its tracked object is removed or its explicit
+-- health value reaches zero. No per-object tasks and no console spam.
 task.spawn(function()
     while running do
-        if not autoBreakEnabled or #breakableIdQueue == 0 then
+        if not autoBreakEnabled or queueIndex > #breakableIdQueue then
             task.wait(0.1)
         else
-            if breakableQueueIndex > #breakableIdQueue then
-                breakableQueueIndex = 1
-            end
-
-            local id = breakableIdQueue[breakableQueueIndex]
-            local trackedObjects = breakableObjectsById[id]
+            local id = breakableIdQueue[queueIndex]
+            local objects = breakableObjectsById[id]
             local hasLiveObject = false
+            local confirmedDestroyed = false
 
-            if trackedObjects then
-                for obj in pairs(trackedObjects) do
+            if objects then
+                for obj in pairs(objects) do
                     if obj and obj:IsDescendantOf(Workspace) then
-                        hasLiveObject = true
-                        break
+                        local health = getHealth(obj)
+                        if health ~= nil and health <= 0 then
+                            confirmedDestroyed = true
+                        else
+                            hasLiveObject = true
+                        end
                     else
-                        trackedObjects[obj] = nil
+                        objects[obj] = nil
                         objectBreakableIds[obj] = nil
                     end
                 end
             end
 
-            if not hasLiveObject then
-                -- This ID has no remaining live object; advance to the next ID.
-                breakableQueueIndex += 1
-                task.wait(0.01)
+            if not hasLiveObject or confirmedDestroyed then
+                queuedIds[id] = nil
+                queueIndex += 1
+
+                -- Compact occasionally to keep the queue small in long sessions.
+                if queueIndex > 100 and queueIndex > (#breakableIdQueue / 2) then
+                    local compact = {}
+                    for i = queueIndex, #breakableIdQueue do
+                        table.insert(compact, breakableIdQueue[i])
+                    end
+                    breakableIdQueue = compact
+                    queueIndex = 1
+                end
+                task.wait(0.03)
             else
-                pcall(function()
+                local ok, err = pcall(function()
                     damageBreakableRemote:FireServer(id)
                 end)
-                task.wait(0.01)
+                if not ok then
+                    warn("[Auto Break] Remote call failed:", err)
+                    task.wait(0.25)
+                else
+                    task.wait(BREAK_HIT_INTERVAL)
+                end
             end
         end
     end
