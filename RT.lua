@@ -291,7 +291,7 @@ local function scanForPossessedRune()
 
     if running and runeIndicatorRunning then
         if runeClaimedValue.Value ~= startingClaimed then
-            runeDistanceLabel.Text = "Count changed; rescan in 60s"
+            runeDistanceLabel.Text = "Count changed; rescan in 1s"
         elseif foundDistance then
             runeDistanceLabel.Text = tostring(foundDistance) .. " purchases away"
             runeLastClaimed = startingClaimed
@@ -313,7 +313,7 @@ task.spawn(function()
         waited += 0.5
     end
 
-    -- Initial scan, then one rescan every 60 seconds.
+    -- Initial scan, then one rescan every 1 seconds.
     while running and runeIndicatorRunning do
         scanForPossessedRune()
         local elapsed = 0
