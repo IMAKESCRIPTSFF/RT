@@ -312,20 +312,23 @@ end
 
 breakableDetectionConnection = Workspace.DescendantAdded:Connect(registerBreakable)
 
--- One damage loop; requests are spaced by 0.01 seconds while Auto Break is enabled.
+-- One damage loop; repeatedly cycles through every discovered ID.
+-- This sends repeated damage requests instead of only one request per ID.
 task.spawn(function()
     while running do
-        if not autoBreakEnabled or breakableQueueIndex > #breakableIdQueue then
+        if not autoBreakEnabled or #breakableIdQueue == 0 then
             task.wait(0.1)
         else
+            if breakableQueueIndex > #breakableIdQueue then
+                breakableQueueIndex = 1
+            end
+
             local id = breakableIdQueue[breakableQueueIndex]
             breakableQueueIndex += 1
 
-            if autoBreakEnabled then
-                pcall(function()
-                    damageBreakableRemote:FireServer(id)
-                end)
-            end
+            pcall(function()
+                damageBreakableRemote:FireServer(id)
+            end)
 
             task.wait(0.01)
         end
