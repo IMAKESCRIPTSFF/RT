@@ -57,6 +57,7 @@ local bossesEnabled = false
 local merchantEnabled = true
 local autoBreakEnabled = false
 local breakableDetectionConnection = nil
+local breakableRemovalConnection = nil
 local minimized = false
 local selectedBosses = {}
 
@@ -260,6 +261,8 @@ local knownBreakableIds = {}
 local pendingBreakableObjects = {}
 local breakableIdQueue = {}
 local breakableQueueIndex = 1
+local objectBreakableIds = {}
+local breakableObjectsById = {}
 
 local function getBreakableId(obj)
     for _, key in ipairs({"ID", "Id", "id", "BreakableId"}) do
@@ -273,6 +276,27 @@ local function getBreakableId(obj)
             and typeof(child.Value) == "number" then
             return child.Value
         end
+    end
+end
+
+local function trackBreakableObject(obj, id)
+    if objectBreakableIds[obj] == id then
+        return
+    end
+
+    -- If this object was previously associated with another ID, remove that link.
+    local oldId = objectBreakableIds[obj]
+    if oldId ~= nil and breakableObjectsById[oldId] then
+        breakableObjectsById[oldId][obj] = nil
+    end
+
+    objectBreakableIds[obj] = id
+    breakableObjectsById[id] = breakableObjectsById[id] or {}
+    breakableObjectsById[id][obj] = true
+
+    if not knownBreakableIds[id] then
+        knownBreakableIds[id] = true
+        table.insert(breakableIdQueue, id)
     end
 end
 
@@ -291,10 +315,7 @@ local function registerBreakable(obj)
 
             local id = getBreakableId(obj)
             if id ~= nil then
-                if not knownBreakableIds[id] then
-                    knownBreakableIds[id] = true
-                    table.insert(breakableIdQueue, id)
-                end
+                trackBreakableObject(obj, id)
                 break
             end
 
@@ -305,15 +326,27 @@ local function registerBreakable(obj)
     end)
 end
 
--- Scan current objects once, then only register newly added descendants.
+local function unregisterBreakable(obj)
+    local id = objectBreakableIds[obj]
+    if id ~= nil then
+        objectBreakableIds[obj] = nil
+        local objects = breakableObjectsById[id]
+        if objects then
+            objects[obj] = nil
+        end
+    end
+end
+
+-- Scan current objects once, then listen for newly added/removed objects.
 for _, obj in ipairs(Workspace:GetDescendants()) do
     registerBreakable(obj)
 end
 
 breakableDetectionConnection = Workspace.DescendantAdded:Connect(registerBreakable)
+breakableRemovalConnection = Workspace.DescendantRemoving:Connect(unregisterBreakable)
 
--- One damage loop; repeatedly cycles through every discovered ID.
--- This sends repeated damage requests instead of only one request per ID.
+-- Keep attacking the current ID until all tracked objects with that ID are removed.
+-- Only then advance to the next discovered ID.
 task.spawn(function()
     while running do
         if not autoBreakEnabled or #breakableIdQueue == 0 then
@@ -324,13 +357,31 @@ task.spawn(function()
             end
 
             local id = breakableIdQueue[breakableQueueIndex]
-            breakableQueueIndex += 1
+            local trackedObjects = breakableObjectsById[id]
+            local hasLiveObject = false
 
-            pcall(function()
-                damageBreakableRemote:FireServer(id)
-            end)
+            if trackedObjects then
+                for obj in pairs(trackedObjects) do
+                    if obj and obj:IsDescendantOf(Workspace) then
+                        hasLiveObject = true
+                        break
+                    else
+                        trackedObjects[obj] = nil
+                        objectBreakableIds[obj] = nil
+                    end
+                end
+            end
 
-            task.wait(0.01)
+            if not hasLiveObject then
+                -- This ID has no remaining live object; advance to the next ID.
+                breakableQueueIndex += 1
+                task.wait(0.01)
+            else
+                pcall(function()
+                    damageBreakableRemote:FireServer(id)
+                end)
+                task.wait(0.01)
+            end
         end
     end
 end)
@@ -559,6 +610,10 @@ closeButton.MouseButton1Click:Connect(function()
     if breakableDetectionConnection then
         breakableDetectionConnection:Disconnect()
         breakableDetectionConnection = nil
+    end
+    if breakableRemovalConnection then
+        breakableRemovalConnection:Disconnect()
+        breakableRemovalConnection = nil
     end
 
     gui:Destroy()
