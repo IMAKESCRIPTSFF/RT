@@ -291,7 +291,7 @@ local function scanForPossessedRune()
 
     if running and runeIndicatorRunning then
         if runeClaimedValue.Value ~= startingClaimed then
-            runeDistanceLabel.Text = "Count changed; rescan in 1s"
+            runeDistanceLabel.Text = "Count changed; rescan in 60s"
         elseif foundDistance then
             runeDistanceLabel.Text = tostring(foundDistance) .. " purchases away"
             runeLastClaimed = startingClaimed
@@ -313,7 +313,7 @@ task.spawn(function()
         waited += 0.5
     end
 
-    -- Initial scan, then one rescan every 1 seconds.
+    -- Initial scan, then one rescan every 60 seconds.
     while running and runeIndicatorRunning do
         scanForPossessedRune()
         local elapsed = 0
@@ -623,6 +623,21 @@ makeToggle("Auto Open Keys", function(enabled)
     end)
 end)
 
+--// AUTO GALAXY DICE — 0.1 SECOND LOOP
+local galaxyDiceEnabled = false
+makeSection("AUTO GALAXY DICE")
+makeToggle("Auto Open Galaxy Dice", function(enabled)
+    galaxyDiceEnabled = enabled
+    if not enabled then return end
+
+    task.spawn(function()
+        while running and galaxyDiceEnabled do
+            safeInvoke(getRemote("RollDice"), "Galaxy Dice")
+            task.wait(0.1)
+        end
+    end)
+end)
+
 --// AUTO MERCHANT — ENABLED ON STARTUP
 makeSection("AUTO MERCHANT")
 makeToggle("Auto Buy Merchant", function(enabled)
@@ -716,6 +731,7 @@ closeButton.MouseButton1Click:Connect(function()
     chestEnabled = false
     bossesEnabled = false
     merchantEnabled = false
+    galaxyDiceEnabled = false
     autoBreakEnabled = false
     runeIndicatorRunning = false
 
